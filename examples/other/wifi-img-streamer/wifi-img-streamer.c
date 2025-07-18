@@ -132,8 +132,8 @@ static jpeg_encoder_t jpeg_encoder;
 
 typedef enum
 {
-  RAW_ENCODING = 0,
-  JPEG_ENCODING = 1
+  RAW_ENCODING = 1,
+  JPEG_ENCODING = 0
 } __attribute__((packed)) StreamerMode_t;
 
 pi_buffer_t header;
@@ -266,11 +266,29 @@ void camera_task(void *parameters)
     if (wifiClientConnected == 1)
     {
       start = xTaskGetTickCount();
-      pi_camera_capture_async(&camera, imgBuff, resolution, pi_task_callback(&task1, capture_done_cb, NULL));
-      pi_camera_control(&camera, PI_CAMERA_CMD_START, 0);
-      xEventGroupWaitBits(evGroup, CAPTURE_DONE_BIT, pdTRUE, pdFALSE, (TickType_t)portMAX_DELAY);
-      pi_camera_control(&camera, PI_CAMERA_CMD_STOP, 0);
-      captureTime = xTaskGetTickCount() - start;
+
+        // 1. カメラを起動する
+        pi_camera_control(&camera, PI_CAMERA_CMD_START, 0);
+
+        // 2. 自動露出とゲインを再設定（新しい、より正確な方法）
+        uint8_t ae_ctrl_val = 1;      // 自動露出を有効化
+        uint8_t gain_val = 0x01;      // アナログゲインを2xに設定
+        uint8_t apply_changes_val = 1; // 設定を反映させる
+
+        pi_camera_reg_set(&camera, 0x2100, &ae_ctrl_val);      // AE_CTRL レジスタ
+        pi_camera_reg_set(&camera, 0x0205, &gain_val);         // ANALOG_GLOBAL_GAIN レジスタ
+        pi_camera_reg_set(&camera, 0x0104, &apply_changes_val); // 設定反映用のレジスタ
+
+        // 3. 画像を非同期で撮影する
+        pi_camera_capture_async(&camera, imgBuff, resolution, pi_task_callback(&task1, capture_done_cb, NULL));
+        
+        // 4. 撮影完了を待つ
+        xEventGroupWaitBits(evGroup, CAPTURE_DONE_BIT, pdTRUE, pdFALSE, (TickType_t)portMAX_DELAY);
+
+        // 5. カメラを停止する
+        pi_camera_control(&camera, PI_CAMERA_CMD_STOP, 0);
+        
+        captureTime = xTaskGetTickCount() - start;
 
       if (streamerMode == JPEG_ENCODING)
       {
